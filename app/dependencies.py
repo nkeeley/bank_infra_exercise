@@ -95,8 +95,13 @@ async def get_current_account_holder(
     Get the AccountHolder profile for the authenticated user.
 
     Chains on get_current_user — the user must be authenticated first.
-    This is used by most banking endpoints (accounts, transactions, etc.)
-    since they operate on the account holder level.
+    This is used by all member banking endpoints (accounts, transactions,
+    transfers, cards, etc.).
+
+    IMPORTANT: Admin users are explicitly blocked from member endpoints.
+    Admins have their own read-only /admin/* endpoints. This prevents
+    admins from accidentally (or maliciously) performing financial
+    operations like creating accounts or initiating transfers.
 
     Args:
         user: The authenticated User (injected by get_current_user).
@@ -106,9 +111,17 @@ async def get_current_account_holder(
         The AccountHolder instance associated with this user.
 
     Raises:
-        HTTPException 404: If the user has no account holder profile
-                           (should never happen in normal flow).
+        HTTPException 403: If the user is an admin (admins use /admin/* endpoints).
+        HTTPException 404: If the user has no account holder profile.
     """
+    # Block admin users from member banking endpoints
+    if user.user_type == UserType.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin accounts cannot access member banking endpoints. "
+                   "Use /admin/* endpoints for read-only access.",
+        )
+
     result = await db.execute(
         select(AccountHolder)
         .where(AccountHolder.user_id == user.id)

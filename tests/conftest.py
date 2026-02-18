@@ -22,6 +22,7 @@ Key design decisions:
 """
 
 import asyncio
+import uuid
 
 import pytest
 import pytest_asyncio
@@ -114,6 +115,78 @@ async def authenticated_client(client):
         },
     )
     assert response.status_code == 201, f"Signup failed: {response.text}"
+    token = response.json()["token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
+
+
+@pytest_asyncio.fixture
+async def admin_client(client, db_engine):
+    """
+    Test client with a pre-registered ADMIN user and JWT token.
+
+    Creates a user via the normal signup endpoint, then directly updates
+    the user_type to ADMIN in the database. This simulates the enterprise
+    pattern where admin accounts are provisioned by a system operator
+    (not self-service).
+
+    The admin can view all accounts/balances/transactions but cannot
+    create accounts, initiate transfers, or modify data.
+    """
+    # Sign up as a normal member
+    signup_response = await client.post(
+        "/auth/signup",
+        json={
+            "email": "admin@example.com",
+            "password": "AdminPass123!",
+            "first_name": "Admin",
+            "last_name": "User",
+        },
+    )
+    assert signup_response.status_code == 201
+    user_id = uuid.UUID(signup_response.json()["user_id"])
+
+    # Promote to admin directly in the database
+    async_session = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False,
+    )
+    async with async_session() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(user_type=UserType.ADMIN)
+        )
+        await session.commit()
+
+    # Log in again to get a fresh token (user_type doesn't affect JWT payload,
+    # but this ensures the test flow is realistic)
+    login_response = await client.post(
+        "/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    )
+    admin_token = login_response.json()["token"]
+    client.headers["Authorization"] = f"Bearer {admin_token}"
+    return client
+
+
+@pytest_asyncio.fixture
+async def second_authenticated_client(client):
+    """
+    A second authenticated MEMBER user for cross-user authorization tests.
+
+    Use this alongside authenticated_client to verify that User A
+    cannot access User B's accounts/data.
+    """
+    response = await client.post(
+        "/auth/signup",
+        json={
+            "email": "seconduser@example.com",
+            "password": "SecurePass456!",
+            "first_name": "Second",
+            "last_name": "User",
+        },
+    )
+    assert response.status_code == 201
     token = response.json()["token"]
     client.headers["Authorization"] = f"Bearer {token}"
     return client

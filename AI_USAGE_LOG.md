@@ -98,3 +98,34 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
 - Created `tests/conftest.py` — test fixtures (in-memory SQLite, client, authenticated_client)
 - Created `tests/test_auth.py` — 16 tests covering signup, login, token validation, profile security
 - All 16 tests passing
+
+---
+
+## Phase 3: Accounts + Role-Based Access Control (2026-02-18)
+
+### User Prompts
+- **"Account holders should only be able to access their own accounts. Admin user can view
+  all balances and transactions but cannot interact. Create tests."**: Added role-based
+  access control with two access levels: MEMBER (own data only) and ADMIN (read-only all data).
+- **"Is there a way to enforce admin accounts not having access to account holder endpoints?"**:
+  Added check in `get_current_account_holder` dependency that blocks ADMIN users from all
+  member banking endpoints (403). Single check point protects all member routes.
+- **"I'd like the admin to be able to view individual transactions as well across all accounts"**:
+  Noted for Phase 4 — admin transaction viewing will be added when Transaction model is built.
+- **"Before we continue, I want to verify whether the user ID is coming from the JWT"**:
+  Traced the full auth chain: JWT `sub` claim → `get_current_user` → `get_current_account_holder`.
+  Confirmed user ID comes exclusively from the cryptographically signed JWT, not from client input.
+- **"Before we continue, I want to retrieve a signup member's information within the test database"**:
+  Ran a script against an in-memory test DB to inspect stored User and AccountHolder records.
+  Verified Argon2id password hashing and correct field storage.
+
+### Action Report
+- Created `app/models/account.py` — Account model with CHECK constraint for non-negative balance
+- Created `app/schemas/account.py` — AccountCreateRequest, AccountResponse, BalanceResponse
+- Created `app/services/account_service.py` — account CRUD with ownership enforcement + admin read-only functions
+- Created `app/routers/accounts.py` — member endpoints (POST/GET /accounts) + admin endpoints (GET /accounts/admin/*)
+- Updated `app/dependencies.py` — added `require_admin` dependency, blocked admins from member endpoints
+- Updated `app/models/account_holder.py` — added `accounts` relationship to Account
+- Updated `tests/conftest.py` — added `admin_client` and `second_authenticated_client` fixtures
+- Created `tests/test_accounts.py` — 24 tests covering creation, retrieval, ownership, admin read-only, role enforcement
+- All 40 tests passing (16 auth + 24 accounts)
