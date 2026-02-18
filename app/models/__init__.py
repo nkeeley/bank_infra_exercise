@@ -10,3 +10,4 @@ Models will be added as they're implemented in subsequent phases.
 
 from app.models.user import User, UserType  # noqa: F401
 from app.models.account_holder import AccountHolder  # noqa: F401
+from app.models.account import Account  # noqa: F401

@@ -83,4 +83,6 @@ class AccountHolder(Base):
     )
 
     # One AccountHolder can own many Accounts
-    # (relationship added in Phase 3 when Account model is defined)
+    accounts: Mapped[list["Account"]] = relationship(
+        back_populates="account_holder",
+    )

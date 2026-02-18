@@ -5,7 +5,9 @@ This module provides shared fixtures used across all test files:
 
   - db_engine / db_session: Fresh in-memory SQLite database for each test
   - client: Async HTTP test client (unauthenticated)
-  - authenticated_client: Test client with a pre-registered user and JWT
+  - authenticated_client: Test client with a pre-registered MEMBER user and JWT
+  - admin_client: Test client with a pre-registered ADMIN user and JWT
+  - second_authenticated_client: A second MEMBER user for cross-user tests
 
 Key design decisions:
   - In-memory SQLite (sqlite+aiosqlite://) is used for speed and isolation.
@@ -14,6 +16,9 @@ Key design decisions:
     so the application code works exactly as it does in production.
   - The authenticated_client fixture creates a user via the signup endpoint,
     so it exercises the real signup flow (not just DB inserts).
+  - The admin_client fixture creates an admin by signing up normally and
+    then directly updating user_type in the DB — this simulates the
+    enterprise pattern where admins are provisioned by a system operator.
 """
 
 import asyncio
@@ -21,10 +26,12 @@ import asyncio
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
+from app.models.user import User, UserType
 
 
 # In-memory SQLite for fast, isolated tests
