@@ -53,7 +53,48 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
 - Created `app/config.py` (Pydantic Settings)
 - Created `app/database.py` (async SQLAlchemy engine, session, Base)
 - Created `app/main.py` (FastAPI app factory with lifespan, health endpoint)
-- Created `app/security.py` (password hashing with bcrypt, JWT creation/verification)
+- Created `app/security.py` (password hashing with Argon2id, JWT creation/verification)
 - Created `app/exceptions.py` (custom exception classes + FastAPI exception handlers)
 - Created package `__init__.py` files
 - Installed dependencies and verified health endpoint responds
+
+### User Feedback During Phase 1
+- **"Use argon2 instead if possible"**: Switched password hashing from bcrypt to Argon2id.
+  Argon2id is the winner of the Password Hashing Competition and is resistant to both
+  GPU-based and side-channel attacks.
+- **"I'd like to create a virtual environment before we install dependencies"**: Created
+  `.venv` virtual environment before installing packages.
+- **"Run again"** (re: secret generation): Regenerated fresh SECRET_KEY and CARD_ENCRYPTION_KEY
+  for the local `.env` file.
+
+---
+
+## Phase 2: Auth + Users (2026-02-17)
+
+### User Prompts
+- **"Adjust so that the user type is defined (e.g. Admin, Bank Employee, Bank Member)"**:
+  Added `UserType` enum (ADMIN, EMPLOYEE, MEMBER) to the User model with a `user_type`
+  column. Default is MEMBER for self-service signup. ADMIN and EMPLOYEE are defined for
+  enterprise readiness but not enforced in MVP auth flow.
+- **"First verify that token and passwords aren't being stored in debug logs"**: Conducted
+  security audit of logging. Confirmed: (1) SQLAlchemy echo mode only logs hashed passwords,
+  never plaintext; (2) uvicorn only logs method/path/status, not request bodies; (3) no
+  request body logging middleware is installed; (4) JWT tokens only appear in response bodies,
+  which are not logged. Added security audit notes to the auth router docstring.
+- **"Add a test for adjusting data that would breach security (aka email)"**: Added
+  `TestProfileSecurity` test class with tests verifying that email cannot be changed via
+  PATCH /account-holders/me (prevents account takeover via stolen token).
+
+### Action Report
+- Created `app/models/user.py` — User model with UserType enum (ADMIN/EMPLOYEE/MEMBER)
+- Created `app/models/account_holder.py` — AccountHolder model (one-to-one with User)
+- Created `app/schemas/auth.py` — signup/login request/response schemas
+- Created `app/schemas/user.py` — UserResponse schema (excludes password hash)
+- Created `app/schemas/account_holder.py` — profile response and update schemas
+- Created `app/services/auth_service.py` — signup and login business logic
+- Created `app/dependencies.py` — JWT validation, get_current_user, get_current_account_holder
+- Created `app/routers/auth.py` — POST /auth/signup, POST /auth/login
+- Created `app/routers/account_holders.py` — GET/PATCH /account-holders/me
+- Created `tests/conftest.py` — test fixtures (in-memory SQLite, client, authenticated_client)
+- Created `tests/test_auth.py` — 16 tests covering signup, login, token validation, profile security
+- All 16 tests passing
