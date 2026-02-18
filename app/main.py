@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
 from app.exceptions import register_exception_handlers
+from app.routers import auth, account_holders
 
 
 @asynccontextmanager
@@ -77,7 +78,8 @@ register_exception_handlers(app)
 # Routers (will be added in subsequent phases)
 # ---------------------------------------------------------------------------
 
-# Phase 2: auth, account_holders
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(account_holders.router, prefix="/account-holders", tags=["Account Holders"])
 # Phase 3: accounts
 # Phase 4: transactions, transfers
 # Phase 5: cards
