@@ -9,7 +9,7 @@ services:
       - CARD_ENCRYPTION_KEY=${CARD_ENCRYPTION_KEY:-generate-with-fernet}
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
       - DEBUG=false
-      - ALLOWED_ORIGINS=["http://localhost","http://localhost:80"]
+      - ALLOWED_ORIGINS=["http://localhost","http://localhost:80","http://frontend"]
     volumes:
       - bank-data:/app/data
     expose:
