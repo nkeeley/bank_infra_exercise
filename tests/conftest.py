@@ -176,23 +176,47 @@ async def admin_client(client, db_engine):
 
 
 @pytest_asyncio.fixture
-async def second_authenticated_client(client):
+async def second_authenticated_client(db_engine):
     """
     A second authenticated MEMBER user for cross-user authorization tests.
 
-    Use this alongside authenticated_client to verify that User A
-    cannot access User B's accounts/data.
+    This fixture creates its OWN httpx.AsyncClient (separate from the
+    primary `client` fixture) so that both `authenticated_client` and
+    `second_authenticated_client` can be used in the same test without
+    overwriting each other's Authorization headers.
     """
-    response = await client.post(
-        "/auth/signup",
-        json={
-            "email": "seconduser@example.com",
-            "password": "SecurePass456!",
-            "first_name": "Second",
-            "last_name": "User",
-        },
+    async_session = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False,
     )
-    assert response.status_code == 201
-    token = response.json()["token"]
-    client.headers["Authorization"] = f"Bearer {token}"
-    return client
+
+    async def override_get_db():
+        async with async_session() as session:
+            try:
+                yield session
+                await session.commit()
+            except BankAPIError:
+                await session.commit()
+                raise
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        response = await ac.post(
+            "/auth/signup",
+            json={
+                "email": "seconduser@example.com",
+                "password": "SecurePass456!",
+                "first_name": "Second",
+                "last_name": "User",
+            },
+        )
+        assert response.status_code == 201
+        token = response.json()["token"]
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
