@@ -129,3 +129,62 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
 - Updated `tests/conftest.py` — added `admin_client` and `second_authenticated_client` fixtures
 - Created `tests/test_accounts.py` — 24 tests covering creation, retrieval, ownership, admin read-only, role enforcement
 - All 40 tests passing (16 auth + 24 accounts)
+
+---
+
+## Phase 4: Transactions + Transfers (2026-02-18)
+
+### User Prompts
+- **"I want the admin to be able to view all transactions at once across org. Same for account
+  balances. Should be possible through these endpoints, but do we need additional ones for
+  these aggregates?"**: Added org-wide admin endpoints: `GET /admin/transactions` (all
+  transactions), `GET /admin/transactions/{id}` (any single transaction),
+  `GET /admin/accounts/{id}/transactions` (any account's transactions).
+- **"Add concurrent transactions testing for different account holders making transactions at
+  same time"**: Added `TestConcurrentTransactions` with 3 tests: concurrent deposits to
+  different accounts, concurrent debits to the same account, and concurrent mixed operations.
+  Tests note SQLite limitations (no row-level locking) while validating concurrent-safe patterns.
+- **"I want additional test cases: 1) tests for mid-transaction crash, 2) test to handle
+  intra-user transfer"**: Added `TestTransferAtomicity` (crash simulation, orphaned transaction
+  detection, audit trail) and `test_intra_user_checking_to_savings` for same-user transfers.
+- **"I like the second approach with the transfer_pair_id"** (re: scoping transfer legs):
+  Changed transfer transactions so each leg only sets its own account — debit sets
+  `from_account_id`, credit sets `to_account_id`, both linked by `transfer_pair_id`.
+
+### Action Report
+- Created `app/models/transaction.py` — Transaction model with CHECK constraint (amount > 0),
+  indexed `created_at` for statement queries, `transfer_pair_id` for linking transfer legs
+- Created `app/schemas/transaction.py` — TransactionCreateRequest, TransactionResponse,
+  TransferRequest (with same-account validation), TransferResponse
+- Created `app/services/transaction_service.py` — **the most critical file**: `create_transaction()`
+  (balance enforcement, declined audit trail), `create_transfer()` (deadlock prevention via sorted
+  UUID locking, atomic paired transactions), admin read-only functions
+- Created `app/routers/transactions.py` — member endpoints for create/list/get transactions
+- Created `app/routers/transfers.py` — POST /transfers (atomic two-leg transfer)
+- Created `app/routers/admin.py` — **consolidated all admin routes** into a dedicated router
+  mounted at `/admin` to avoid route-ordering conflicts (FastAPI matches parameterized routes
+  like `/{account_id}` before literal routes like `/admin` when they share a prefix)
+- Updated `app/database.py` — `get_db()` now commits on `BankAPIError` (business logic errors)
+  so declined transactions are persisted for the audit trail, while still rolling back on
+  unexpected errors
+- Updated `app/main.py` — registered admin router at `/admin` prefix, removed admin routes from
+  accounts and transactions routers
+- Created `tests/test_transactions.py` — 17 tests: deposits, purchases, insufficient balance
+  rejection, declined transaction audit trail, listing/filtering, balance integrity,
+  concurrent transactions, admin access
+- Created `tests/test_transfers.py` — 16 tests: intra-user transfers (checking↔savings),
+  inter-user transfers, insufficient funds, same-account rejection, cross-user authorization,
+  nonexistent account handling, atomicity (crash rollback, no orphaned transactions),
+  declined audit trail, balance integrity verification, admin blocked from transfers
+- All 73 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers)
+
+### Key Bugs Found & Fixed
+1. **Route-ordering conflict**: Admin routes (`/admin/transactions`) were matched as
+   `/{account_id}/transactions` with `account_id="admin"` → UUID parse error (422).
+   Fix: consolidated all admin routes into a dedicated `/admin` router.
+2. **Declined transactions lost**: `get_db()` rolled back ALL exceptions, including business
+   logic errors. Declined transactions were created but then rolled back before the response.
+   Fix: `get_db()` now commits on `BankAPIError` subclasses.
+3. **Transfer legs over-scoped**: Both debit and credit transactions had `from_account_id`
+   and `to_account_id` set, causing both legs to appear in the source account's transaction
+   list. Fix: each leg now only sets its own account field; `transfer_pair_id` links them.
