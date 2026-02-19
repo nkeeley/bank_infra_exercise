@@ -16,6 +16,9 @@ class TransactionCreateRequest(BaseModel):
     type: Literal["credit", "debit"]
     amount_cents: int = Field(gt=0, description="Amount in cents (must be positive)")
     description: str | None = None
+    card_id: uuid.UUID | None = Field(
+        None, description="Optional debit card ID used for this purchase (debit only)"
+    )
 
 
 class TransactionResponse(BaseModel):
@@ -28,6 +31,7 @@ class TransactionResponse(BaseModel):
     status: str
     description: str | None
     transfer_pair_id: uuid.UUID | None
+    card_id: uuid.UUID | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

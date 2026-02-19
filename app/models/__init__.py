@@ -12,3 +12,4 @@ from app.models.user import User, UserType  # noqa: F401
 from app.models.account_holder import AccountHolder  # noqa: F401
 from app.models.account import Account  # noqa: F401
 from app.models.transaction import Transaction  # noqa: F401
+from app.models.card import Card  # noqa: F401

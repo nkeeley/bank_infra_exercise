@@ -16,6 +16,7 @@ Key fields:
   - to_account_id: The destination account (NULL for withdrawals/purchases)
   - status: "pending", "approved", or "declined"
   - transfer_pair_id: Links the two legs of a transfer (NULL for non-transfers)
+  - card_id: The debit card used for the purchase (NULL for non-card transactions)
 
 Status field:
   For MVP, transactions are immediately "approved" or "declined" (synchronous).
@@ -92,6 +93,14 @@ class Transaction(Base):
     # Links two legs of a transfer — both the debit and credit transactions
     # in a transfer share the same transfer_pair_id UUID
     transfer_pair_id: Mapped[uuid.UUID | None] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+
+    # The debit card used for this purchase (NULL for non-card transactions).
+    # Only set on debit transactions — the card must belong to the same account.
+    card_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cards.id"),
         nullable=True,
         index=True,
     )
