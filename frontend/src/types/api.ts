@@ -23,6 +23,13 @@ export interface SignupResponse {
 export interface TokenResponse {
   token: string;
   token_type: string;
+  user_type: string;
+}
+
+export interface AccountLookupResponse {
+  id: string;
+  account_type: string;
+  account_number: string;
 }
 
 // ── Account Holders ──

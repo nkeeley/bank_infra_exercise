@@ -11,7 +11,7 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (data: UserLoginRequest) => Promise<void>;
+  login: (data: UserLoginRequest) => Promise<string>;
   signup: (data: UserSignupRequest) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
@@ -53,18 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (data: UserLoginRequest) => {
     const res = await authApi.login(data);
     setToken(res.token);
-    // Decode JWT to get user_type (simple base64 decode of payload)
-    try {
-      const payload = JSON.parse(atob(res.token.split(".")[1]));
-      const userType = payload.user_type || "member";
-      localStorage.setItem("bank_user_type", userType);
-      localStorage.setItem("bank_user_email", data.email);
-      setState({ isAuthenticated: true, userType, email: data.email, profile: null, loading: true });
-    } catch {
-      localStorage.setItem("bank_user_type", "member");
-      localStorage.setItem("bank_user_email", data.email);
-      setState({ isAuthenticated: true, userType: "member", email: data.email, profile: null, loading: true });
-    }
+    const userType = res.user_type || "member";
+    localStorage.setItem("bank_user_type", userType);
+    localStorage.setItem("bank_user_email", data.email);
+    setState({ isAuthenticated: true, userType, email: data.email, profile: null, loading: true });
+    return userType;
   }, []);
 
   const signup = useCallback(async (data: UserSignupRequest) => {

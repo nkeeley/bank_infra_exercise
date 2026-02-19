@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { accounts, transfers as transfersApi } from "@/lib/api";
-import type { AccountResponse } from "@/types/api";
+import type { AccountResponse, AccountLookupResponse } from "@/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCents, maskAccountNumber } from "@/lib/format";
-import { ArrowLeftRight, CheckCircle2 } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, Search } from "lucide-react";
+
+const EXTERNAL_VALUE = "__external__";
 
 export default function TransfersPage() {
   const [accts, setAccts] = useState<AccountResponse[]>([]);
@@ -19,9 +21,39 @@ export default function TransfersPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  // External account lookup state
+  const [externalNumber, setExternalNumber] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResult, setLookupResult] = useState<AccountLookupResponse | null>(null);
+  const [lookupError, setLookupError] = useState("");
+
   useEffect(() => {
     accounts.list().then(setAccts);
   }, []);
+
+  const isExternal = toId === EXTERNAL_VALUE;
+
+  const handleLookup = async () => {
+    setLookupError("");
+    setLookupResult(null);
+    if (!externalNumber.trim()) { setLookupError("Enter an account number"); return; }
+    setLookupLoading(true);
+    try {
+      const result = await accounts.lookup(externalNumber.trim());
+      // Don't allow transferring to own accounts via external lookup
+      if (accts.some(a => a.id === result.id)) {
+        setLookupError("This is your own account — select it from the dropdown instead");
+        return;
+      }
+      setLookupResult(result);
+    } catch (err: any) {
+      setLookupError(err.message || "Account not found");
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const resolvedToId = isExternal ? lookupResult?.id ?? "" : toId;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,18 +61,21 @@ export default function TransfersPage() {
     setSuccess(false);
     const cents = Math.round(parseFloat(amount) * 100);
     if (!cents || cents <= 0) { setError("Enter a valid amount"); return; }
-    if (fromId === toId) { setError("Cannot transfer to the same account"); return; }
+    if (fromId === resolvedToId) { setError("Cannot transfer to the same account"); return; }
+    if (!resolvedToId) { setError("Select or look up a destination account"); return; }
     setLoading(true);
     try {
       await transfersApi.create({
         from_account_id: fromId,
-        to_account_id: toId,
+        to_account_id: resolvedToId,
         amount_cents: cents,
         description: description || null,
       });
       setSuccess(true);
       setAmount("");
       setDescription("");
+      setLookupResult(null);
+      setExternalNumber("");
       // Refresh balances
       const refreshed = await accounts.list();
       setAccts(refreshed);
@@ -55,7 +90,7 @@ export default function TransfersPage() {
     <div className="space-y-8 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Transfers</h1>
-        <p className="text-muted-foreground mt-1">Move money between your accounts</p>
+        <p className="text-muted-foreground mt-1">Move money between accounts</p>
       </div>
 
       <Card className="shadow-premium max-w-lg">
@@ -92,7 +127,7 @@ export default function TransfersPage() {
 
             <div className="space-y-2">
               <Label>To Account</Label>
-              <Select value={toId} onValueChange={setToId}>
+              <Select value={toId} onValueChange={(v) => { setToId(v); setLookupResult(null); setLookupError(""); setExternalNumber(""); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select destination account" />
                 </SelectTrigger>
@@ -102,9 +137,34 @@ export default function TransfersPage() {
                       {a.account_type} — {maskAccountNumber(a.account_number)}
                     </SelectItem>
                   ))}
+                  <SelectItem value={EXTERNAL_VALUE}>
+                    External account (look up by number)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {isExternal && (
+              <div className="space-y-2 rounded-lg border p-3 bg-muted/50">
+                <Label>Account Number</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter 10-digit account number"
+                    value={externalNumber}
+                    onChange={e => { setExternalNumber(e.target.value); setLookupResult(null); setLookupError(""); }}
+                  />
+                  <Button type="button" variant="outline" size="icon" onClick={handleLookup} disabled={lookupLoading}>
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </div>
+                {lookupError && <p className="text-destructive text-xs">{lookupError}</p>}
+                {lookupResult && (
+                  <p className="text-success text-xs">
+                    Found: {lookupResult.account_type} account ({maskAccountNumber(lookupResult.account_number)})
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Amount ($)</Label>
@@ -128,7 +188,11 @@ export default function TransfersPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full gradient-accent text-accent-foreground" disabled={loading || !fromId || !toId}>
+            <Button
+              type="submit"
+              className="w-full gradient-accent text-accent-foreground"
+              disabled={loading || !fromId || !resolvedToId}
+            >
               {loading ? "Processing..." : "Transfer Funds"}
             </Button>
           </form>

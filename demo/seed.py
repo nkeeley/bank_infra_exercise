@@ -34,6 +34,7 @@ import asyncio
 import os
 import random
 import sys
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -140,14 +141,16 @@ def auth_header(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def create_account(client: httpx.AsyncClient, token: str, account_type: str) -> str:
+async def create_account(client: httpx.AsyncClient, token: str, account_type: str) -> dict:
+    """Create an account and return {id, account_number}."""
     resp = await client.post(
         f"{BASE_URL}/accounts",
         json={"account_type": account_type},
         headers=auth_header(token),
     )
     resp.raise_for_status()
-    return resp.json()["id"]
+    data = resp.json()
+    return {"id": data["id"], "account_number": data["account_number"]}
 
 
 async def transact(client: httpx.AsyncClient, token: str, account_id: str,
@@ -203,38 +206,111 @@ async def get_balance(client: httpx.AsyncClient, token: str, account_id: str) ->
 # Seed logic
 # ---------------------------------------------------------------------------
 
-async def seed_history(client: httpx.AsyncClient, token: str, account_id: str,
-                       account_type: str, months: int,
-                       card_id: str | None = None) -> None:
-    """Generate 2-3 months of realistic transaction history.
+async def seed_history(
+    client: httpx.AsyncClient, token: str, account_id: str,
+    account_type: str, months: int,
+    card_id: str | None = None,
+    checking_id: str | None = None,
+) -> list[str]:
+    """Generate 2 months of realistic transaction history.
+
+    Returns a list of transaction IDs created, so they can be backdated.
 
     If card_id is provided (checking accounts), ~60% of purchases will
     use the debit card so the frontend shows card-linked transactions.
+
+    For savings accounts, if checking_id is provided, uses real transfers
+    from checking→savings (creating debit/credit pairs in both accounts).
     """
+    txn_ids: list[str] = []
+
     if account_type == "checking":
         for _ in range(months):
             # 2 payroll deposits per month
-            await transact(client, token, account_id, "credit",
-                           random.randint(1_800_00, 3_200_00), "Payroll deposit")
-            await transact(client, token, account_id, "credit",
-                           random.randint(1_800_00, 3_200_00), "Payroll deposit")
+            for _ in range(2):
+                result = await transact(client, token, account_id, "credit",
+                                        random.randint(1_800_00, 3_200_00), "Payroll deposit")
+                if result.get("id"):
+                    txn_ids.append(result["id"])
             # 8-15 purchases per month
             for _ in range(random.randint(8, 15)):
                 desc = random.choice(DEBIT_DESCRIPTIONS)
                 amount = random.randint(3_00, 120_00)
-                # Use card for ~60% of purchases
                 use_card = card_id if (card_id and random.random() < 0.6) else None
                 result = await transact(client, token, account_id, "debit",
                                         amount, desc, card_id=use_card)
+                if result.get("id"):
+                    txn_ids.append(result["id"])
                 if result.get("status") == "declined":
                     break
     else:
+        # Savings: use real transfers from checking if available
         for _ in range(months):
-            await transact(client, token, account_id, "credit",
-                           random.randint(200_00, 800_00), "Monthly savings transfer")
+            amount = random.randint(200_00, 800_00)
+            if checking_id:
+                result = await do_transfer(
+                    client, token, checking_id, account_id,
+                    amount, "Monthly savings transfer",
+                )
+                # Transfer creates 2 transactions; collect both IDs
+                if result.get("debit_transaction"):
+                    txn_ids.append(result["debit_transaction"]["id"])
+                if result.get("credit_transaction"):
+                    txn_ids.append(result["credit_transaction"]["id"])
+            else:
+                result = await transact(client, token, account_id, "credit",
+                                        amount, "Monthly savings transfer")
+                if result.get("id"):
+                    txn_ids.append(result["id"])
             if random.random() < 0.2:
-                await transact(client, token, account_id, "debit",
-                               random.randint(100_00, 300_00), "Savings withdrawal")
+                result = await transact(client, token, account_id, "debit",
+                                        random.randint(100_00, 300_00), "Savings withdrawal")
+                if result.get("id"):
+                    txn_ids.append(result["id"])
+
+    return txn_ids
+
+
+async def backdate_transactions(txn_ids_by_month: dict[int, list[str]]) -> None:
+    """Update created_at timestamps directly in the DB to spread transactions
+    across multiple months.
+
+    txn_ids_by_month maps month_offset (0 = current, 1 = last month, etc.)
+    to lists of transaction IDs that should be dated in that month.
+    Within each month, transactions are spread across random days.
+    """
+    import uuid as uuid_mod
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+    from app.config import settings
+    from app.models.transaction import Transaction
+
+    engine = create_async_engine(settings.DATABASE_URL)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession)
+
+    now = datetime.now(timezone.utc)
+
+    async with session_factory() as session:
+        for month_offset, ids in txn_ids_by_month.items():
+            if not ids:
+                continue
+            # Target the middle of the month, offset months back
+            base = now.replace(day=15) - timedelta(days=30 * month_offset)
+            for txn_id in ids:
+                # Random day within the month (spread across ±12 days from base)
+                offset_days = random.randint(-12, 12)
+                offset_hours = random.randint(8, 20)
+                offset_mins = random.randint(0, 59)
+                ts = base + timedelta(days=offset_days, hours=offset_hours - base.hour,
+                                      minutes=offset_mins - base.minute)
+                await session.execute(
+                    update(Transaction)
+                    .where(Transaction.id == uuid_mod.UUID(txn_id))
+                    .values(created_at=ts, updated_at=ts)
+                )
+        await session.commit()
+
+    await engine.dispose()
 
 
 async def promote_to_admin(admin_email: str) -> None:
@@ -270,6 +346,10 @@ async def seed(base_url: str) -> None:
     print("  DEMO SEED — NOT FOR PRODUCTION")
     print("========================================\n")
 
+    # Collect transaction IDs by month offset for backdating
+    # month 0 = current month, month 1 = last month
+    txn_ids_by_month: dict[int, list[str]] = {0: [], 1: []}
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Health check
         try:
@@ -295,35 +375,56 @@ async def seed(base_url: str) -> None:
             token = await signup(client, member)
             log(f"Login: {member['email']} / {member['password']}")
 
+            # First pass: create accounts, deposits, and cards
+            member_accounts: list[dict] = []
+            checking_id = None
             for acct_info in member.get("accounts", []):
-                account_id = await create_account(client, token, acct_info["type"])
-                log(f"  {acct_info['type'].capitalize()} account created")
+                acct_data = await create_account(client, token, acct_info["type"])
+                account_id = acct_data["id"]
+                account_number = acct_data["account_number"]
+                log(f"  {acct_info['type'].capitalize()} account: {account_number}")
 
-                # Opening deposit
-                await transact(client, token, account_id, "credit",
-                               acct_info["initial_deposit"], "Opening deposit")
+                # Opening deposit (always month 1 — oldest)
+                result = await transact(client, token, account_id, "credit",
+                                        acct_info["initial_deposit"], "Opening deposit")
+                if result.get("id"):
+                    txn_ids_by_month[1].append(result["id"])
                 log(f"  Opening deposit: {cents_to_dollars(acct_info['initial_deposit'])}")
 
-                # Issue card for checking accounts BEFORE history so purchases use it
                 card_id = None
                 if acct_info["type"] == "checking":
+                    checking_id = account_id
                     card_id = await issue_card(client, token, account_id)
                     if card_id:
                         log(f"  Debit card issued")
 
-                # Historical transactions (with card for ~60% of purchases)
-                months = random.choice([2, 3])
-                await seed_history(client, token, account_id, acct_info["type"],
-                                   months, card_id=card_id)
+                member_accounts.append({
+                    "account_id": account_id,
+                    "type": acct_info["type"],
+                    "card_id": card_id,
+                })
 
-                balance = await get_balance(client, token, account_id)
-                log(f"  {months} months of history seeded. Balance: {cents_to_dollars(balance)}")
+            # Second pass: seed history (savings needs checking_id for real transfers)
+            for acct in member_accounts:
+                months = 2
+                ids = await seed_history(
+                    client, token, acct["account_id"], acct["type"],
+                    months, card_id=acct["card_id"],
+                    checking_id=checking_id if acct["type"] == "savings" else None,
+                )
+                # Split collected IDs across 2 months
+                mid = len(ids) // 2
+                txn_ids_by_month[1].extend(ids[:mid])   # older half → last month
+                txn_ids_by_month[0].extend(ids[mid:])   # newer half → this month
+
+                balance = await get_balance(client, token, acct["account_id"])
+                log(f"  {acct['type'].capitalize()}: {months} months seeded. Balance: {cents_to_dollars(balance)}")
 
                 all_accounts.append({
-                    "account_id": account_id,
+                    "account_id": acct["account_id"],
                     "token": token,
                     "name": name,
-                    "type": acct_info["type"],
+                    "type": acct["type"],
                 })
 
         # --- Inter-user transfers ---
@@ -370,6 +471,12 @@ async def seed(base_url: str) -> None:
                 )
                 if "error_type" not in result:
                     log(f"{c['name']} -> {d['name']}: {cents_to_dollars(amount)}")
+
+    # --- Backdate transactions across 2 months ---
+    print("\nBackdating transactions across 2 months...")
+    await backdate_transactions(txn_ids_by_month)
+    log(f"Month -1 (last month): {len(txn_ids_by_month[1])} transactions")
+    log(f"Month  0 (this month): {len(txn_ids_by_month[0])} transactions")
 
     # --- Summary ---
     print("\n========================================")
