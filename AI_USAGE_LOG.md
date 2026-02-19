@@ -279,3 +279,89 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
   same user.
 - All 123 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers +
   18 cards + 9 statements + 5 precision + 18 authorization)
+
+---
+
+## Frontend Integration + Demo Seed (2026-02-18 – 2026-02-19)
+
+### User Prompts
+- **"Frontend is in subdirectory called 'frontend'. Check .gitignore captures what we don't
+  want to commit"**: Added `frontend/node_modules/`, `frontend/dist/`, `frontend/.vite/`,
+  and `demo/__pycache__/` to `.gitignore`.
+- **"Three changes: user_type in login response, account lookup endpoint, seed card usage"**:
+  Implemented all three: `user_type` added to `TokenResponse`, new `GET /accounts/lookup`
+  endpoint for cross-user transfers, seed updated with card-linked purchases and inter-user
+  transfers.
+- **"Alice Chen flow issues: 1) can't look up other accounts for transfers, 2) savings
+  transfers missing checking debit legs, 3) only 1 month of statement data"**: Fixed all
+  three: added external account lookup to Transfers.tsx, changed seed to use real transfer
+  pairs for savings (creating debit/credit in both accounts), added backdating function to
+  spread transactions across 2 months.
+- **"Fix admin user flow via frontend"**: Login was always routing to `/dashboard`. Root cause:
+  AuthContext decoded `user_type` from JWT payload (which only has `sub`). Fixed to use
+  `res.user_type` from API response; login now routes admin to `/admin`, members to `/dashboard`.
+- **"Update seed to show account numbers"**: Modified `create_account()` to return account
+  number, seed output now prints account numbers for each user.
+
+### Action Report
+- Modified `app/schemas/auth.py` — added `user_type: str` to `TokenResponse`
+- Modified `app/routers/auth.py` — login returns `user_type` from user model
+- Created `app/schemas/account.py` `AccountLookupResponse` — minimal info (id, type, number)
+- Added `account_service.lookup_by_account_number()` for cross-user account lookup
+- Added `GET /accounts/lookup` route (placed before `/{account_id}` to avoid route conflict)
+- Created `demo/seed.py` — demo seed script with 6 users (1 admin + 5 members), accounts,
+  cards, historical transactions, inter-user transfers, and backdating across 2 months
+- Created `demo/README.md` — credentials table and usage instructions
+- Updated `frontend/src/types/api.ts` — added `AccountLookupResponse`, `user_type` in `TokenResponse`
+- Updated `frontend/src/lib/api.ts` — added `accounts.lookup()` function
+- Rewrote `frontend/src/pages/member/Transfers.tsx` — "External account" option with
+  account number input and lookup button for cross-user transfers
+- Updated `frontend/src/contexts/AuthContext.tsx` — login uses `res.user_type` directly
+  instead of JWT decode; returns user type for routing
+- Updated `frontend/src/pages/Login.tsx` — routes admin to `/admin`, members to `/dashboard`
+- All 123 tests passing after all changes
+
+### Key Bugs Found & Fixed
+1. **CORS blocking frontend**: Lovable preview domain not in ALLOWED_ORIGINS. Temporarily
+   set to `["*"]` for development, later tightened for production.
+2. **Streamlit app.py import collision**: `demo/app.py` (Streamlit) collided with `app/`
+   package when running seed script. Deleted Streamlit file.
+3. **Savings transfer legs missing in checking**: Seed created standalone credits labeled
+   "Monthly savings transfer" — no corresponding debit in checking. Fixed to use real
+   `do_transfer()` calls creating proper debit/credit pairs.
+4. **Backdating UUID type mismatch**: Transaction IDs from API are strings, but SQLAlchemy
+   expected UUID objects for the WHERE clause. Fixed with `uuid.UUID(txn_id)`.
+5. **Admin login routed to member dashboard**: AuthContext decoded user_type from JWT payload
+   (only has `sub` claim). Fixed to use `res.user_type` from TokenResponse.
+
+---
+
+## Phase 8: Docker + Production Hardening (2026-02-19)
+
+### User Prompts
+- **"Prep this repo to be sent as a docker image to hosting service. Backend and frontend
+  can be managed by separate services"**: Created two-service Docker setup with separate
+  Dockerfiles for backend (Python/uvicorn) and frontend (Node build + nginx serve).
+- **"Turn off echo for SQL engine. Uvicorn --reload should not be part of production build.
+  CORS adjusted so it can't handle any connection, just the ones we have specified"**:
+  Verified SQL echo is controlled by `DEBUG` flag (already `echo=settings.DEBUG`). Docker
+  CMD uses plain `uvicorn` without `--reload`. Locked down CORS to specific origins in
+  both `.env` and `docker-compose.yml`.
+- **"Create a subdirectory for documentation with placeholder files"**: Created `docs/`
+  with SECURITY.md and ROADMAP.md placeholders.
+
+### Action Report
+- Created `Dockerfile.backend` — Python 3.11-slim, non-root user, uvicorn on :8000
+- Created `Dockerfile.frontend` — two-stage build: node:20 builds Vite app, nginx:alpine
+  serves static files with API reverse proxy
+- Created `nginx.conf` — SPA fallback, `/api/*` proxied to backend service
+- Created `docker-compose.yml` — two services, SQLite volume persistence, strict CORS,
+  DEBUG=false, secrets via env vars
+- Created `.dockerignore` — excludes .venv, tests, data, node_modules
+- Updated `.env` — `DEBUG=false`, CORS locked to `localhost:8080`, `localhost:80`, `localhost`
+- Updated `.env.example` — matches production-ready defaults
+- Docker build and startup verified: both services run, API health check passes through
+  nginx proxy, signup/login flow works end-to-end
+- Created `docs/SECURITY.md` and `docs/ROADMAP.md` placeholder files
+- Updated `AI_USAGE_LOG.md` with all sessions through Phase 8
+- All 123 tests passing

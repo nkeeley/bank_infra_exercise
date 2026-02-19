@@ -29,9 +29,10 @@ class UserLoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """Response body for successful login/signup — contains the JWT."""
+    """Response body for successful login — contains the JWT and user role."""
     token: str
     token_type: str = "bearer"
+    user_type: str
 
 
 class SignupResponse(BaseModel):

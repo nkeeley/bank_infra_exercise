@@ -34,6 +34,19 @@ class AccountResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AccountLookupResponse(BaseModel):
+    """Minimal account info returned by the lookup endpoint.
+
+    Intentionally excludes balance and owner details — this is used by
+    members to verify an account number before initiating a transfer.
+    """
+    id: uuid.UUID
+    account_type: str
+    account_number: str
+
+    model_config = {"from_attributes": True}
+
+
 class BalanceResponse(BaseModel):
     """
     Balance check response — includes both cached and computed values.

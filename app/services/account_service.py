@@ -99,6 +99,28 @@ async def get_accounts(
     return list(result.scalars().all())
 
 
+async def lookup_by_account_number(
+    db: AsyncSession,
+    account_number: str,
+) -> Account:
+    """
+    Look up an account by its account number.
+
+    Returns minimal info (id, type, number) — no balance or owner details.
+    Used by members to verify an account exists before initiating a transfer.
+
+    Raises:
+        AccountNotFoundError: If no account matches the number.
+    """
+    result = await db.execute(
+        select(Account).where(Account.account_number == account_number)
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise AccountNotFoundError(uuid.UUID(int=0))  # No real ID to report
+    return account
+
+
 async def get_account(
     db: AsyncSession,
     account_id: uuid.UUID,
