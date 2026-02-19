@@ -247,3 +247,35 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
   params validation, invalid month rejection, opening balance from prior months, ownership
   enforcement, admin blocked
 - All 100 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers + 18 cards + 9 statements)
+
+---
+
+## Phase 7: Advanced Tests (2026-02-18)
+
+### User Prompts
+- **"Add tests where non-admins try to access admin endpoints"**: Added
+  `TestNonAdminBlockedFromAdminEndpoints` test class verifying that regular MEMBER
+  users receive 403 on all six `/admin/*` endpoints, including when the account is
+  their own (role gate fires before ownership check).
+
+### Action Report
+- Created `tests/test_precision.py` — 5 tests: integer-only amounts in responses,
+  large cent values (100M cents), no rounding errors with 100 repeated 1-cent deposits,
+  sum verification after mixed credits/debits, transfer preserves total money supply
+  across three accounts
+- Created `tests/test_authorization.py` — 18 tests across 6 test classes:
+  - `TestCrossUserAccountAccess` (4 tests): cannot view, check balance, list, or deposit
+    into another user's account
+  - `TestCrossUserTransactionAccess` (2 tests): cannot list or view another user's transactions
+  - `TestCrossUserTransferProtection` (2 tests): cannot transfer from or drain another
+    user's account; verifies source balance unchanged after rejected attempt
+  - `TestCrossUserCardAccess` (2 tests): cannot view or issue cards on another user's account
+  - `TestCrossUserStatementAccess` (1 test): cannot request another user's statement
+  - `TestNonAdminBlockedFromAdminEndpoints` (7 tests): MEMBER blocked from all 6 admin
+    endpoints, including own account via admin routes (role gate before ownership check)
+- Fixed `tests/conftest.py` — `second_authenticated_client` fixture now creates its own
+  `AsyncClient` instance instead of sharing one with `authenticated_client`. The previous
+  implementation overwrote the auth header, causing both fixtures to authenticate as the
+  same user.
+- All 123 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers +
+  18 cards + 9 statements + 5 precision + 18 authorization)
