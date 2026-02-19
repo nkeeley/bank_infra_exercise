@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState(s => ({ ...s, loading: false }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.isAuthenticated]);
+  }, [state.isAuthenticated, state.userType]);
 
   const login = useCallback(async (data: UserLoginRequest) => {
     const res = await authApi.login(data);
