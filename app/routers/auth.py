@@ -98,4 +98,4 @@ async def login(
         password=request.password,
     )
 
-    return TokenResponse(token=token)
+    return TokenResponse(token=token, user_type=user.user_type.value)

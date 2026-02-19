@@ -211,3 +211,11 @@ data/
 *.db
 *.db-journal
 *.db-wal
+
+# Frontend (Node/React)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Streamlit demo app
+demo/__pycache__/

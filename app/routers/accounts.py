@@ -13,13 +13,13 @@ to avoid route-ordering conflicts with parameterized paths.
 
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_account_holder
 from app.models.account_holder import AccountHolder
-from app.schemas.account import AccountCreateRequest, AccountResponse, BalanceResponse
+from app.schemas.account import AccountCreateRequest, AccountLookupResponse, AccountResponse, BalanceResponse
 from app.services import account_service
 
 router = APIRouter()
@@ -67,6 +67,26 @@ async def list_accounts(
     way to see other users' accounts through this endpoint.
     """
     return await account_service.get_accounts(db, account_holder.id)
+
+
+@router.get(
+    "/lookup",
+    response_model=AccountLookupResponse,
+    summary="Look up an account by account number",
+)
+async def lookup_account(
+    account_number: str = Query(..., min_length=1, description="The 10-digit account number"),
+    account_holder: AccountHolder = Depends(get_current_account_holder),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Look up an account by its account number for transfers.
+
+    Returns minimal info (ID, type, number) — no balance or owner details.
+    Any authenticated member can look up any account number, which is how
+    real banks work: you need someone's account number to send them money.
+    """
+    return await account_service.lookup_by_account_number(db, account_number)
 
 
 @router.get(
