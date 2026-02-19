@@ -263,7 +263,7 @@ class TestAdminReadOnly:
         )
 
         # Admin lists all accounts
-        response = await admin_client.get("/accounts/admin/all")
+        response = await admin_client.get("/admin/accounts")
         assert response.status_code == 200
         accounts = response.json()
         assert len(accounts) >= 1
@@ -288,7 +288,7 @@ class TestAdminReadOnly:
         account_id = create_response.json()["id"]
 
         # Admin views the member's account
-        response = await admin_client.get(f"/accounts/admin/{account_id}")
+        response = await admin_client.get(f"/admin/accounts/{account_id}")
         assert response.status_code == 200
         assert response.json()["id"] == account_id
 
@@ -311,7 +311,7 @@ class TestAdminReadOnly:
         )
         account_id = create_response.json()["id"]
 
-        response = await admin_client.get(f"/accounts/admin/{account_id}/balance")
+        response = await admin_client.get(f"/admin/accounts/{account_id}/balance")
         assert response.status_code == 200
         data = response.json()
         assert data["cached_balance_cents"] == 0
@@ -375,23 +375,23 @@ class TestMemberBlockedFromAdminEndpoints:
 
     async def test_member_cannot_list_all_accounts(self, authenticated_client):
         """Regular members should get 403 on admin list endpoint."""
-        response = await authenticated_client.get("/accounts/admin/all")
+        response = await authenticated_client.get("/admin/accounts")
         assert response.status_code == 403
         assert "Admin access required" in response.json()["detail"]
 
     async def test_member_cannot_view_admin_account_detail(self, authenticated_client):
         """Regular members should get 403 on admin account detail."""
         fake_id = str(uuid.uuid4())
-        response = await authenticated_client.get(f"/accounts/admin/{fake_id}")
+        response = await authenticated_client.get(f"/admin/accounts/{fake_id}")
         assert response.status_code == 403
 
     async def test_member_cannot_view_admin_balance(self, authenticated_client):
         """Regular members should get 403 on admin balance endpoint."""
         fake_id = str(uuid.uuid4())
-        response = await authenticated_client.get(f"/accounts/admin/{fake_id}/balance")
+        response = await authenticated_client.get(f"/admin/accounts/{fake_id}/balance")
         assert response.status_code == 403
 
     async def test_unauthenticated_cannot_access_admin_endpoints(self, client):
         """Unauthenticated requests should get 401 on admin endpoints."""
-        response = await client.get("/accounts/admin/all")
+        response = await client.get("/admin/accounts")
         assert response.status_code == 401

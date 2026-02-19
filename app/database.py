@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+from app.exceptions import BankAPIError
 
 
 # Create the async engine.
@@ -70,6 +71,11 @@ async def get_db():
         try:
             yield session
             await session.commit()
+        except BankAPIError:
+            # Business logic errors (e.g., InsufficientFundsError) — commit the
+            # session so audit-trail records (like declined transactions) are persisted.
+            await session.commit()
+            raise
         except Exception:
             await session.rollback()
             raise

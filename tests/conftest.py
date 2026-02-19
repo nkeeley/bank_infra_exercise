@@ -31,6 +31,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.database import Base, get_db
+from app.exceptions import BankAPIError
 from app.main import app
 from app.models.user import User, UserType
 
@@ -82,6 +83,11 @@ async def client(db_engine):
             try:
                 yield session
                 await session.commit()
+            except BankAPIError:
+                # Business logic errors — commit so declined transactions
+                # are persisted for audit trail verification in tests
+                await session.commit()
+                raise
             except Exception:
                 await session.rollback()
                 raise
