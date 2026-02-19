@@ -14,10 +14,8 @@ RUN pip install --no-cache-dir . && \
 # Copy application code
 COPY app/ ./app/
 
-# Create non-root user and data directory
-RUN useradd --create-home appuser && \
-    mkdir -p /app/data && chown -R appuser:appuser /app
-USER appuser
+# Ensure data directory exists for SQLite volume mount
+RUN mkdir -p /app/data
 
 EXPOSE 8000
 
