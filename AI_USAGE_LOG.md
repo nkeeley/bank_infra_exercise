@@ -222,3 +222,28 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
   wrong-account card rejection, credit-with-card rejection, nonexistent card, declined
   purchase audit trail with card_id, ownership enforcement, admin blocked
 - All 91 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers + 18 cards)
+
+---
+
+## Phase 6: Statements (2026-02-18)
+
+### User Prompts
+- **"For statements, I want them produced for each account, aggregated monthly. The user
+  should see every transaction if they scroll, but the aggregates should be at the top
+  (beginning balance, ending balance, total transactions, etc.)"**: Designed the statement
+  response with aggregate fields first (opening/closing balance, total credits/debits,
+  transaction count) followed by the full chronological transaction list.
+
+### Action Report
+- Created `app/schemas/statement.py` — StatementResponse with aggregates at top, full
+  transaction list at bottom
+- Created `app/services/statement_service.py` — `generate_statement()` computes opening
+  balance from sum of all approved transactions before the month, closing balance from
+  opening + net of month's activity, aggregates credits/debits separately
+- Created `app/routers/statements.py` — GET /accounts/{id}/statements?year=&month=
+- Updated `app/main.py` — registered statements router
+- Created `tests/test_statements.py` — 9 tests: full statement with aggregates, empty month,
+  declined transactions in list but excluded from totals, chronological ordering, required
+  params validation, invalid month rejection, opening balance from prior months, ownership
+  enforcement, admin blocked
+- All 100 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers + 18 cards + 9 statements)
