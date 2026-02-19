@@ -188,3 +188,37 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
 3. **Transfer legs over-scoped**: Both debit and credit transactions had `from_account_id`
    and `to_account_id` set, causing both legs to appear in the source account's transaction
    list. Fix: each leg now only sets its own account field; `transfer_pair_id` links them.
+
+---
+
+## Phase 5: Cards (2026-02-18)
+
+### User Prompts
+- **"Users should be able to 'use' cards for purchases. Transactions using cards should
+  showcase the card that was used. Only cards that account holder owns can be used, and
+  only cards linked to an account can pull funds from that account."**: Added `card_id`
+  field to Transaction model and schema. Transaction service validates that the card
+  belongs to the account, is active, and is only used on debit (not credit) transactions.
+- **"'Paying off' a card should just be a debit from the account associated with that card.
+  Not sure if we need temporary balances for cards — what do you think?"**: Discussed two
+  models: debit card (card is payment instrument, account is source of funds) vs credit card
+  (card has its own balance/debt). User chose the debit card approach — simpler, card-linked
+  purchases debit the account directly. Credit card model noted for ROADMAP.md.
+
+### Action Report
+- Created `app/models/card.py` — Card model with Fernet-encrypted card_number and CVV,
+  plaintext last_four for display, UNIQUE constraint on account_id (one card per account)
+- Created `app/schemas/card.py` — CardResponse (excludes encrypted fields)
+- Created `app/services/card_service.py` — `issue_card()` (generates 16-digit number + CVV,
+  encrypts with Fernet, sets 3-year expiration), `get_card()` (masked retrieval)
+- Created `app/routers/cards.py` — POST/GET /accounts/{id}/card
+- Updated `app/models/transaction.py` — added `card_id` FK to cards table
+- Updated `app/schemas/transaction.py` — added `card_id` to request and response
+- Updated `app/services/transaction_service.py` — validates card ownership, active status,
+  and debit-only usage when `card_id` is provided; records card_id on declined transactions
+- Updated `app/main.py` — registered cards router
+- Created `tests/test_cards.py` — 18 tests: issuance, masked response, duplicate rejection,
+  encrypted storage verification (decrypt from DB), debit card purchases (with/without card),
+  wrong-account card rejection, credit-with-card rejection, nonexistent card, declined
+  purchase audit trail with card_id, ownership enforcement, admin blocked
+- All 91 tests passing (16 auth + 24 accounts + 17 transactions + 16 transfers + 18 cards)

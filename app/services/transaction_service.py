@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AccountNotFoundError, InsufficientFundsError, UnauthorizedAccessError
 from app.models.account import Account
+from app.models.card import Card
 from app.models.transaction import Transaction
 
 
@@ -53,6 +54,7 @@ async def create_transaction(
     txn_type: str,
     amount_cents: int,
     description: str | None = None,
+    card_id: uuid.UUID | None = None,
 ) -> Transaction:
     """
     Create a single credit or debit transaction.
@@ -60,16 +62,16 @@ async def create_transaction(
     For CREDITS (deposits):
       - Adds amount to the account's cached_balance_cents
       - Creates an approved transaction with to_account_id set
+      - card_id is not allowed (deposits don't use cards)
 
     For DEBITS (purchases/withdrawals):
+      - If card_id is provided, validates the card belongs to this account
+        and is active (debit card purchase)
       - Checks if the account has sufficient balance
       - If insufficient: creates a DECLINED transaction for the audit trail
         and raises InsufficientFundsError
       - If sufficient: deducts from cached_balance_cents and creates an
         approved transaction with from_account_id set
-
-    The balance update and transaction insert happen atomically — if either
-    fails, both are rolled back.
 
     Args:
         db: Database session.
@@ -79,6 +81,7 @@ async def create_transaction(
         txn_type: "credit" or "debit".
         amount_cents: Positive integer amount in cents.
         description: Optional memo/narrative.
+        card_id: Optional debit card used for this purchase.
 
     Returns:
         The created Transaction instance.
@@ -87,6 +90,8 @@ async def create_transaction(
         AccountNotFoundError: If the account doesn't exist.
         UnauthorizedAccessError: If the account belongs to someone else.
         InsufficientFundsError: If a debit would cause a negative balance.
+        HTTPException 400: If card_id is provided on a credit transaction,
+                           or the card doesn't belong to this account.
     """
     # Verify ownership and lock the account row
     result = await db.execute(
@@ -102,6 +107,37 @@ async def create_transaction(
     if account.account_holder_id != account_holder_id:
         raise UnauthorizedAccessError("You do not have access to this account")
 
+    # Validate card usage
+    if card_id is not None:
+        from fastapi import HTTPException, status as http_status
+
+        if txn_type == "credit":
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Cards cannot be used for deposit (credit) transactions",
+            )
+
+        card_result = await db.execute(
+            select(Card).where(Card.id == card_id)
+        )
+        card = card_result.scalar_one_or_none()
+
+        if card is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Card not found",
+            )
+        if card.account_id != account_id:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Card does not belong to this account",
+            )
+        if not card.is_active:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Card is not active",
+            )
+
     if txn_type == "debit":
         if account.cached_balance_cents < amount_cents:
             # Create a declined transaction for the audit trail
@@ -111,6 +147,7 @@ async def create_transaction(
                 from_account_id=account_id,
                 status="declined",
                 description=description,
+                card_id=card_id,
             )
             db.add(declined_txn)
             await db.flush()
@@ -129,6 +166,7 @@ async def create_transaction(
             from_account_id=account_id,
             status="approved",
             description=description,
+            card_id=card_id,
         )
     else:
         # Credit: add to balance

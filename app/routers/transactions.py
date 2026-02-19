@@ -45,6 +45,9 @@ async def create_transaction(
     - **credit**: Adds money to the account (e.g., paycheck deposit)
     - **debit**: Removes money from the account (e.g., purchase)
 
+    For debit card purchases, include `card_id` to record which card was used.
+    The card must belong to this account and be active.
+
     Debits are rejected if the account has insufficient balance. A declined
     transaction is still recorded for audit purposes.
 
@@ -57,6 +60,7 @@ async def create_transaction(
         txn_type=request.type,
         amount_cents=request.amount_cents,
         description=request.description,
+        card_id=request.card_id,
     )
     return txn
 
