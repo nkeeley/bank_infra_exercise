@@ -20,8 +20,8 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login({ email, password });
-      navigate("/dashboard");
+      const userType = await login({ email, password });
+      navigate(userType === "admin" ? "/admin" : "/dashboard");
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {
