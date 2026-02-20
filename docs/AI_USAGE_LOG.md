@@ -1,7 +1,39 @@
 # AI Usage Log
 
-This document tracks all AI-assisted development in this project. Each entry includes
-the user prompt (summarized) and a brief action report of what was generated or changed.
+This document tracks all AI-assisted work on this project across two tools used concurrently.
+
+---
+
+## Approach
+
+All software development was performed using **Claude Code** (Anthropic's CLI agent). Every code
+change — including file creation, edits, test runs, Docker configuration, and deployment — was
+generated through Claude Code and reviewed by me before acceptance. I reviewed each adjustment both
+for correctness/validation and as a learning exercise to understand the patterns and decisions
+being implemented.
+
+Concurrently, I used **ChatGPT** for business-logic and design-choice questions — often while
+waiting for code to render or tests to run. These conversations informed architectural decisions
+(integer cents vs floats, atomic transfers, authentication strategy, etc.) that I then brought
+back to the Claude Code sessions as requirements and constraints.
+
+---
+
+## Manual Interventions
+
+- Debug guidance on running tests with the active `.venv` virtual environment
+- Defined database schema and model attributes
+- Researched and made design choices surrounding integer cents, SQLAlchemy usage (to support SQLite in Python), banking business operations approach (reflecting credit/debit legs), and Argon2 vs bcrypt for password hashing
+- Defined user types (Admin, Employee, Member) and their access boundaries
+- Requested concurrency testing for transactions to handle scaling
+- Requested adaptability for AWS scaling
+- Routing specific for admin user types, rather than blended with member endpoints
+- Request for test cases for transfers, in addition to transactions
+- Request for transaction scrolling in statements
+
+---
+
+# Part 1: Software Development (Claude Code)
 
 ---
 
@@ -434,3 +466,225 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
    via `railway ssh`.
 6. **Admin login race condition**: `useEffect` in AuthContext only depended on
    `isAuthenticated`, not `userType`, so switching user types didn't re-trigger profile logic.
+
+---
+
+# Part 2: Business Design Logic (ChatGPT)
+
+---
+
+## 1. Architectural Guidance
+
+**Prompt Summary:**
+Provided project scope (FastAPI + SQLite backend with accounts, transactions, authentication, etc.) and asked for architectural tradeoffs.
+
+**Guidance Summary:**
+* Separate API (routers), services (business logic), and data access layers.
+* Store money as integer cents, never floats.
+* Ensure all transfers are atomic.
+* Keep transaction records immutable.
+* Design with production-readiness in mind (auditability, separation of concerns).
+
+**Implementation Decision:** Adopted layered structure and integer-based monetary representation.
+
+---
+
+## 2. Database Updates During Transfers
+
+**Prompt Summary:**
+"How does the DB get updated during transaction execution? Webhooks?"
+
+**Guidance Summary:**
+* Webhooks are for external systems, not internal DB updates.
+* Use a single atomic database transaction.
+* Debit and credit must occur in the same transaction.
+* Roll back if any step fails.
+
+**Implementation Decision:** Transfers execute within explicit DB transaction blocks to prevent partial updates.
+
+---
+
+## 3. Real-World Transfer Mechanics
+
+**Prompt Summary:**
+"How does money in-transit get verified?"
+
+**Guidance Summary:**
+* Internal transfers are ledger updates.
+* External transfers involve clearing networks.
+* Use transaction statuses (PENDING, COMPLETED, FAILED).
+* For MVP, simulate internal transfers but design with extensibility in mind.
+
+**Implementation Decision:** Include a status field in the transactions table.
+
+---
+
+## 4. Password Security & Encryption
+
+**Prompt Summary:**
+"What is best practice for password security and data encryption?"
+
+**Guidance Summary:**
+* Use Argon2 (preferred) or bcrypt for password hashing.
+* Never store plaintext passwords.
+* Use HTTPS for encryption in transit.
+* Store secrets in environment variables.
+
+**Implementation Decision:** Selected Argon2 for password hashing. Secrets managed via environment configuration.
+
+---
+
+## 5. Structured vs Unstructured Database for Statements
+
+**Prompt Summary:**
+"Do we need an unstructured DB for statements?"
+
+**Guidance Summary:**
+* Statements are derived from structured transaction data.
+* Use relational queries to generate statements.
+* No need for NoSQL for this use case.
+
+**Implementation Decision:** Statements generated via SQL queries over transactions.
+
+---
+
+## 6. Authentication Best Practices
+
+**Prompt Summary:**
+"What is best practice for authentication?"
+
+**Guidance Summary:**
+* Use JWT-based stateless authentication.
+* Short-lived access tokens.
+* Optional refresh tokens.
+* Never log tokens.
+
+**Implementation Decision:** Implemented JWT access tokens with minimal claims.
+
+---
+
+## 7. Integer Cents vs Floats
+
+**Prompt Summary:**
+"Why not use floats for money?"
+
+**Guidance Summary:**
+* Floats introduce rounding errors.
+* 64-bit integers provide sufficient range.
+* Integer cents is standard in financial systems.
+
+**Implementation Decision:** All monetary values stored as integer cents.
+
+---
+
+## 8. Concurrency Handling
+
+**Prompt Summary:**
+"How handle concurrency with many transactions at once?"
+
+**Guidance Summary:**
+* Use atomic DB transactions.
+* Guard balance updates with conditional SQL checks.
+* Prevent race conditions and double-spending.
+
+**Implementation Decision:** Balance updates executed conditionally inside transaction blocks.
+
+---
+
+## 9. Balance Column + Ledger Entries
+
+**Prompt Summary:**
+"Is having both a balance column and debit/credit transactions acceptable?"
+
+**Guidance Summary:**
+* Acceptable for MVP.
+* Transactions must remain immutable.
+* Balance acts as a cached aggregate.
+* Two entries per transfer (debit + credit).
+
+**Implementation Decision:** Implemented balance column and immutable transaction records.
+
+---
+
+## 10. Failed Transactions
+
+**Prompt Summary:**
+"Should failed transactions register in the transaction table?"
+
+**Guidance Summary:**
+* Do not create ledger entries if no funds moved.
+* Optionally log failed attempts separately.
+
+**Implementation Decision:** Failed transfers do not create ledger entries.
+
+---
+
+## 11. Email as PII
+
+**Prompt Summary:**
+"Should email be hashed?"
+
+**Guidance Summary:**
+* Do not hash email.
+* It must remain searchable.
+* Protect via access controls.
+* Only hash passwords.
+
+**Implementation Decision:** Emails stored normally; passwords hashed.
+
+---
+
+## 12. JWT Clarification
+
+**Prompt Summary:**
+"What is JWT and how is it used?"
+
+**Guidance Summary:**
+* JWT is a signed, stateless authentication token.
+* Use short expiration.
+* Avoid storing sensitive data in token payload.
+
+**Implementation Decision:** JWT access tokens implemented with minimal claims (user_id, role, exp).
+
+---
+
+## 13. Token Exposure Validation
+
+**Prompt Summary:**
+"Validate that the token is not echoed or retrievable."
+
+**Guidance Summary:**
+* Returning token once at login is correct.
+* Do not log or persist tokens.
+* Store secrets in environment variables.
+
+**Implementation Decision:** Confirmed token only returned during login response.
+
+---
+
+## 14. bcrypt vs Argon2
+
+**Prompt Summary:**
+"bcrypt vs argon2"
+
+**Guidance Summary:**
+* Both secure.
+* Argon2 (Argon2id) is modern and memory-hard.
+* Preferred for new systems.
+
+**Implementation Decision:** Selected Argon2 for password hashing.
+
+---
+
+## 15. Python Packaging
+
+**Prompt Summary:**
+"What does .[dev] mean?"
+"What is .egg-info directory?"
+
+**Guidance Summary:**
+* ".[dev]" installs optional development dependencies.
+* .egg-info contains package metadata.
+* Should not be committed to version control.
+
+**Implementation Decision:** Added *.egg-info/ to .gitignore and structured dev dependencies properly.
