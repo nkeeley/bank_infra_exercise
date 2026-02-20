@@ -365,3 +365,72 @@ Docker setup, and documentation. AI_USAGE_LOG.md updated every phase.
 - Created `docs/SECURITY.md` and `docs/ROADMAP.md` placeholder files
 - Updated `AI_USAGE_LOG.md` with all sessions through Phase 8
 - All 123 tests passing
+
+---
+
+## Deployment + Live Testing (2026-02-19)
+
+### User Prompts
+- **"I want to host this project (backend on Railway and frontend on Vercel). Walk me
+  through steps"**: Provided step-by-step deployment guide for both platforms. Discussed
+  SQLite persistence on Railway (Railway Volume at `/app/data`).
+- **"Create files first"**: Created `railway.toml` (Dockerfile path, start command,
+  healthcheck) and `frontend/vercel.json` (API rewrites to Railway backend, SPA fallback).
+- **"Let's just do the CLI"**: Installed Railway CLI, created project `bank-infra-exercise`,
+  added backend service with environment variables, attached persistent volume at `/app/data`,
+  generated domain, deployed.
+- **"Why aren't we using github link?"**: Linked Railway service to GitHub repo via dashboard
+  for auto-deploy on push to main.
+- **Railway healthcheck failure — invalid port**: `railway.toml` used `${PORT:-8000}` shell
+  expansion which Railway doesn't support. Fixed to hardcode `--port 8000` and set `PORT=8000`
+  as Railway variable.
+- **SQLite "unable to open database file"**: Railway volume mount overrode directory ownership,
+  non-root `appuser` couldn't write. Removed non-root user from Dockerfile (Railway handles
+  container isolation at platform level).
+- **Vercel build failed — CSS @import order**: `@import` must precede `@tailwind` directives.
+  Moved font import to top of `index.css`.
+- **Vercel build failed — missing `frontend/src/lib/`**: Root `.gitignore` had `lib/` (Python
+  template rule) which caught `frontend/src/lib/`. Changed to `/lib/` to only match root-level.
+  Three files were missing from git: `api.ts`, `format.ts`, `utils.ts`.
+- **"I want to seed the demo data"**: Ran seed script against Railway backend using
+  `--base-url https://backend-production-48d37.up.railway.app`. All users, accounts,
+  transactions, and cards seeded successfully.
+- **Admin login routing to member dashboard on deployed site**: `promote_to_admin()` in seed
+  script connected to local SQLite (via `settings.DATABASE_URL`) instead of Railway's DB.
+  Admin user was created as member on Railway. Created `demo/promote_admin.py`, added `demo/`
+  to Docker image (removed from `.dockerignore`), ran via `railway ssh` to promote admin.
+- **"Run all backend tests one last time"**: All 123 tests passed in 8.4s.
+
+### Action Report
+- Created `railway.toml` — build config pointing to `Dockerfile.backend`, healthcheck at `/health`
+- Created `frontend/vercel.json` — `/api/*` rewrite to Railway backend URL, SPA fallback
+- Installed Railway CLI, created project + backend service via CLI
+- Set Railway environment variables: DATABASE_URL, SECRET_KEY, CARD_ENCRYPTION_KEY,
+  ACCESS_TOKEN_EXPIRE_MINUTES, DEBUG, ALLOWED_ORIGINS, PORT
+- Attached Railway Volume at `/app/data` for SQLite persistence
+- Generated Railway domain: `backend-production-48d37.up.railway.app`
+- Fixed `railway.toml` start command (hardcoded port instead of shell expansion)
+- Removed non-root user from `Dockerfile.backend` for Railway volume compatibility
+- Fixed `.gitignore` `lib/` → `/lib/` to stop excluding `frontend/src/lib/`
+- Moved CSS `@import` before `@tailwind` directives in `frontend/src/index.css`
+- Updated `vercel.json` with actual Railway backend URL
+- Updated Railway CORS to include `https://bank-infra-exercise.vercel.app`
+- Seeded demo data against Railway backend
+- Created `demo/promote_admin.py` and ran on Railway container via SSH
+- Fixed `AuthContext.tsx` — added `state.userType` to useEffect deps for admin login flow
+- Removed `demo/` from `.dockerignore`, added `COPY demo/` to Dockerfile
+- All 123 backend tests passing
+
+### Key Bugs Found & Fixed
+1. **Railway port parsing**: `${PORT:-8000}` shell expansion not supported in Railway
+   `startCommand`. Hardcoded to `--port 8000`.
+2. **Volume permissions**: Railway volume mount as root made `/app/data` unwritable for
+   non-root container user. Removed `USER appuser` from Dockerfile.
+3. **CSS @import order**: Vite/Vercel strict mode requires `@import` before other statements.
+4. **`.gitignore` `lib/` too broad**: Python template rule caught `frontend/src/lib/`,
+   preventing 3 critical frontend files from being committed.
+5. **Seed admin promotion ran locally**: `promote_to_admin()` used `settings.DATABASE_URL`
+   which resolved to local SQLite, not Railway's. Created separate promote script and ran
+   via `railway ssh`.
+6. **Admin login race condition**: `useEffect` in AuthContext only depended on
+   `isAuthenticated`, not `userType`, so switching user types didn't re-trigger profile logic.
